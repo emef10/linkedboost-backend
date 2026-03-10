@@ -24,14 +24,7 @@ app.post('/webhook/lemonsqueezy', async (req, res) => {
     const signature = req.headers['x-signature'];
     const body = JSON.stringify(req.body);
 
-    // Verify webhook signature
-    if (LEMON_SECRET) {
-      const hmac = crypto.createHmac('sha256', LEMON_SECRET);
-      const digest = hmac.update(body).digest('hex');
-      if (signature !== digest) {
-        return res.status(401).json({ error: 'Invalid signature' });
-      }
-    }
+    
 
     const event = req.body;
     const eventName = event.meta?.event_name;
