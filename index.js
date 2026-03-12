@@ -107,6 +107,54 @@ app.post('/api/claude', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+// Aylık kullanım sayacı sıfırlama
+app.post('/api/check-reset', async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ error: 'email required' });
+
+    // Kullanıcının reset_date'ini kontrol et
+    const getRes = await fetch(
+      `${SUPABASE_URL}/rest/v1/usage_counts?email=eq.${encodeURIComponent(email)}`,
+      {
+        headers: {
+          'apikey': SUPABASE_SERVICE_KEY,
+          'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`
+        }
+      }
+    );
+    const data = await getRes.json();
+
+    if (data && data.length > 0) {
+      const resetDate = new Date(data[0].reset_date);
+      const now = new Date();
+      const diffDays = (now - resetDate) / (1000 * 60 * 60 * 24);
+
+      // 30 günden fazla geçtiyse sayacı sıfırla
+      if (diffDays >= 30) {
+        await fetch(
+          `${SUPABASE_URL}/rest/v1/usage_counts?email=eq.${encodeURIComponent(email)}`,
+          {
+            method: 'PATCH',
+            headers: {
+              'apikey': SUPABASE_SERVICE_KEY,
+              'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ count: 0, reset_date: new Date().toISOString() })
+          }
+        );
+        console.log('Sayaç sıfırlandı:', email);
+        return res.json({ reset: true });
+      }
+    }
+
+    res.json({ reset: false });
+  } catch (err) {
+    console.error('Reset error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 app.listen(PORT, () => {
   console.log(`LinkedBoost backend running on port ${PORT}`);
