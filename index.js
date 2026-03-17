@@ -10,8 +10,8 @@ const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY || '';
 const LEMON_SECRET = process.env.LEMON_WEBHOOK_SECRET || '';
 
 app.use(cors());
-app.use(express.json({ type: '*/*' }));
-app.use(express.raw({ type: 'application/json' }));
+app.use('/webhook/lemonsqueezy', express.raw({ type: '*/*' }));
+app.use(express.json());
 
 // Health check
 app.get('/', (req, res) => {
@@ -22,37 +22,39 @@ app.get('/', (req, res) => {
 app.post('/webhook/lemonsqueezy', async (req, res) => {
   try {
     const signature = req.headers['x-signature'];
-    const body = JSON.stringify(req.body);
+    const body = req.body.toString();
+    const event = JSON.parse(body);
 
     // Verify webhook signature
     if (LEMON_SECRET) {
       const hmac = crypto.createHmac('sha256', LEMON_SECRET);
       const digest = hmac.update(body).digest('hex');
       if (signature !== digest) {
+        console.log('Invalid signature - expected:', digest, 'got:', signature);
         return res.status(401).json({ error: 'Invalid signature' });
       }
     }
 
-    const event = req.body;
     const eventName = event.meta?.event_name;
-
     console.log('Webhook received:', eventName);
 
-    // Handle subscription created or order completed
-    if (eventName === 'order_created' || eventName === 'subscription_created') {
+    if (eventName === 'order_created' || eventName === 'subscription_created' || eventName === 'subscription_updated') {
       const customerEmail = event.data?.attributes?.user_email || 
                            event.data?.attributes?.customer_email;
-      const variantId = event.data?.attributes?.first_order_item?.variant_id ||
-                       event.data?.attributes?.variant_id;
+      const variantId = event.data?.attributes?.variant_id ||
+                       event.data?.attributes?.first_order_item?.variant_id;
 
       if (!customerEmail) {
         return res.status(400).json({ error: 'No email found' });
       }
 
-      // Determine plan based on variant
-      const plan = 'pro'; // Default to pro for any payment
+      let plan = 'pro';
+      if (variantId == '1387499') {
+        plan = 'agency';
+      } else if (variantId == '1387498') {
+        plan = 'pro';
+      }
 
-      // Update user plan in Supabase
       const updateRes = await fetch(
         `${SUPABASE_URL}/rest/v1/profiles?email=eq.${encodeURIComponent(customerEmail)}`,
         {
@@ -77,7 +79,7 @@ app.post('/webhook/lemonsqueezy', async (req, res) => {
   }
 });
 
-// Claude API Proxy — API key frontend'de görünmez
+// Claude API Proxy
 app.post('/api/claude', async (req, res) => {
   try {
     const { messages, max_tokens } = req.body;
@@ -107,13 +109,13 @@ app.post('/api/claude', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
 // Aylık kullanım sayacı sıfırlama
 app.post('/api/check-reset', async (req, res) => {
   try {
     const { email } = req.body;
     if (!email) return res.status(400).json({ error: 'email required' });
 
-    // Kullanıcının reset_date'ini kontrol et
     const getRes = await fetch(
       `${SUPABASE_URL}/rest/v1/usage_counts?email=eq.${encodeURIComponent(email)}`,
       {
@@ -130,7 +132,6 @@ app.post('/api/check-reset', async (req, res) => {
       const now = new Date();
       const diffDays = (now - resetDate) / (1000 * 60 * 60 * 24);
 
-      // 30 günden fazla geçtiyse sayacı sıfırla
       if (diffDays >= 30) {
         await fetch(
           `${SUPABASE_URL}/rest/v1/usage_counts?email=eq.${encodeURIComponent(email)}`,
